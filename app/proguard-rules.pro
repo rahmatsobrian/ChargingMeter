@@ -1,0 +1,3 @@
+-keep class com.yuki.chargingmeter.** { *; }
+-keepattributes *Annotation*
+-dontwarn kotlin.**

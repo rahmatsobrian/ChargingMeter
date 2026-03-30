@@ -1,0 +1,164 @@
+name: 🔋 Build ChargingMeter APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Tipe build'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 🏗️ Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout kode
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ☕ Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: 📦 Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+          cache-read-only: false
+
+      - name: 🤖 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 🔑 Beri permission gradlew
+        run: |
+          chmod +x gradlew
+          echo "✅ gradlew permission OK"
+
+      - name: 🔍 Info environment
+        run: |
+          echo "=== Java Version ==="
+          java -version
+          echo ""
+          echo "=== Gradle Version ==="
+          ./gradlew --version 2>&1
+          echo ""
+          echo "=== Android SDK Platforms ==="
+          ls "$ANDROID_HOME/platforms/" 2>/dev/null | head -10 || echo "Tidak ada platform"
+          echo ""
+          echo "=== libs.versions.toml ==="
+          cat gradle/libs.versions.toml
+          echo ""
+          echo "=== app/build.gradle.kts ==="
+          cat app/build.gradle.kts
+
+      - name: 🔨 Build APK Debug
+        if: github.event.inputs.build_type != 'release'
+        run: |
+          echo "=== Memulai Build Debug ==="
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            2>&1 | tee build-output.log
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo ""
+          if [ $BUILD_EXIT -eq 0 ]; then
+            echo "✅ BUILD DEBUG BERHASIL"
+          else
+            echo "❌ BUILD DEBUG GAGAL (exit: $BUILD_EXIT)"
+            echo "=== Error dari log ==="
+            grep -E "(error|Error|FAILED|Exception)" build-output.log | tail -30
+            exit 1
+          fi
+
+      - name: 🚀 Build APK Release (unsigned)
+        if: github.event.inputs.build_type == 'release'
+        run: |
+          echo "=== Memulai Build Release ==="
+          ./gradlew assembleRelease \
+            --no-daemon \
+            --stacktrace \
+            2>&1 | tee build-output.log
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo ""
+          if [ $BUILD_EXIT -eq 0 ]; then
+            echo "✅ BUILD RELEASE BERHASIL"
+          else
+            echo "❌ BUILD RELEASE GAGAL (exit: $BUILD_EXIT)"
+            echo "=== Error dari log ==="
+            grep -E "(error|Error|FAILED|Exception)" build-output.log | tail -30
+            exit 1
+          fi
+
+      - name: 🔎 Info APK output
+        run: |
+          echo "=== APK yang dihasilkan ==="
+          find . -name "*.apk" -not -path "*/intermediates/*" | while read apk; do
+            size=$(du -sh "$apk" | cut -f1)
+            echo "📦 $(basename $apk) — $size"
+            echo "   Path: $apk"
+          done
+
+      - name: 📤 Upload APK Debug
+        if: github.event.inputs.build_type != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChargingMeter-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: 📤 Upload APK Release
+        if: github.event.inputs.build_type == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChargingMeter-release-${{ github.run_number }}
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 📋 Upload log jika gagal
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-error-${{ github.run_number }}
+          path: |
+            build-output.log
+            app/build/reports/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: 📊 Build Summary
+        if: always()
+        run: |
+          echo "## 🔋 ChargingMeter Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${GITHUB_SHA::7}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build # | \`${{ github.run_number }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tipe | \`${{ github.event.inputs.build_type || 'debug' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 APK Output" >> $GITHUB_STEP_SUMMARY
+          find . -name "*.apk" -not -path "*/intermediates/*" 2>/dev/null | while read apk; do
+            size=$(du -sh "$apk" | cut -f1)
+            echo "- \`$(basename $apk)\` — **$size**" >> $GITHUB_STEP_SUMMARY
+          done || echo "- Tidak ada APK dihasilkan" >> $GITHUB_STEP_SUMMARY
