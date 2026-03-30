@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.BoltRounded
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -90,7 +90,7 @@ fun BatteryGauge(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             if (isCharging) {
                 Icon(
-                    imageVector = Icons.Rounded.BoltRounded,
+                    imageVector = Icons.Rounded.Bolt,
                     contentDescription = "Charging",
                     tint = arcColor,
                     modifier = Modifier.size(28.dp)

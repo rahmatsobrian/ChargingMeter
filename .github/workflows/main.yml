@@ -27,97 +27,139 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: 📥 Checkout kode
+      # ── 1. Checkout ────────────────────────────────────────────
+      - name: 📥 Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
+      # ── 2. JDK ─────────────────────────────────────────────────
       - name: ☕ Setup JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
-      - name: 📦 Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
-          cache-read-only: false
-
+      # ── 3. Android SDK ─────────────────────────────────────────
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 🔑 Beri permission gradlew
+      # ── 4. Download gradle-wrapper.jar ─────────────────────────
+      # gradle-wrapper.jar tidak ikut di repo (gitignore).
+      # Step ini download dari distribusi resmi Gradle dan ekstrak jar-nya.
+      - name: 📦 Download gradle-wrapper.jar
         run: |
-          chmod +x gradlew
-          echo "✅ gradlew permission OK"
+          GRADLE_VERSION="8.7"
+          JAR_PATH="gradle/wrapper/gradle-wrapper.jar"
+          DIST_URL="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
 
+          echo "=== Download Gradle ${GRADLE_VERSION} distribution ==="
+          mkdir -p gradle/wrapper
+          curl -fsSL "$DIST_URL" -o /tmp/gradle-dist.zip
+          echo "✅ Download selesai"
+
+          echo "=== Ekstrak gradle-wrapper.jar ==="
+          unzip -q /tmp/gradle-dist.zip -d /tmp/gradle-extracted/
+          find /tmp/gradle-extracted -name "gradle-wrapper.jar" | head -1 | \
+            xargs -I{} cp {} "$JAR_PATH"
+
+          # Verifikasi
+          if [ -f "$JAR_PATH" ] && [ -s "$JAR_PATH" ]; then
+            echo "✅ gradle-wrapper.jar siap ($(du -sh $JAR_PATH | cut -f1))"
+          else
+            echo "❌ Gagal mendapatkan gradle-wrapper.jar"
+            ls -lh gradle/wrapper/ || true
+            exit 1
+          fi
+          rm -rf /tmp/gradle-dist.zip /tmp/gradle-extracted
+
+      # ── 5. Permission gradlew ──────────────────────────────────
+      - name: 🔑 Permission gradlew
+        run: chmod +x gradlew
+
+      # ── 6. Info Environment ────────────────────────────────────
       - name: 🔍 Info environment
         run: |
-          echo "=== Java Version ==="
-          java -version
+          echo "=============================="
+          echo "=== JAVA VERSION ==="
+          java -version 2>&1
           echo ""
-          echo "=== Gradle Version ==="
+          echo "=== GRADLE WRAPPER ==="
+          ls -lh gradle/wrapper/
+          echo ""
+          echo "=== GRADLE VERSION ==="
           ./gradlew --version 2>&1
           echo ""
-          echo "=== Android SDK Platforms ==="
-          ls "$ANDROID_HOME/platforms/" 2>/dev/null | head -10 || echo "Tidak ada platform"
+          echo "=== ANDROID SDK ==="
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms/" 2>/dev/null | head -5 || echo "No platforms"
           echo ""
           echo "=== libs.versions.toml ==="
           cat gradle/libs.versions.toml
           echo ""
           echo "=== app/build.gradle.kts ==="
           cat app/build.gradle.kts
+          echo "=============================="
 
+      # ── 7. Build Debug ─────────────────────────────────────────
       - name: 🔨 Build APK Debug
         if: github.event.inputs.build_type != 'release'
         run: |
-          echo "=== Memulai Build Debug ==="
+          echo "=== Memulai assembleDebug ==="
           ./gradlew assembleDebug \
             --no-daemon \
             --stacktrace \
+            --warning-mode all \
             2>&1 | tee build-output.log
           BUILD_EXIT=${PIPESTATUS[0]}
-          echo ""
+
           if [ $BUILD_EXIT -eq 0 ]; then
+            echo ""
             echo "✅ BUILD DEBUG BERHASIL"
           else
-            echo "❌ BUILD DEBUG GAGAL (exit: $BUILD_EXIT)"
-            echo "=== Error dari log ==="
-            grep -E "(error|Error|FAILED|Exception)" build-output.log | tail -30
+            echo ""
+            echo "❌ BUILD GAGAL (exit code: $BUILD_EXIT)"
+            echo "====== ERROR SUMMARY ======"
+            grep -E "(^e:|error:|FAILED|Exception|Caused by:|> Could not|> Task)" \
+              build-output.log | head -40
+            echo "==========================="
             exit 1
           fi
 
+      # ── 8. Build Release ───────────────────────────────────────
       - name: 🚀 Build APK Release (unsigned)
         if: github.event.inputs.build_type == 'release'
         run: |
-          echo "=== Memulai Build Release ==="
+          echo "=== Memulai assembleRelease ==="
           ./gradlew assembleRelease \
             --no-daemon \
             --stacktrace \
+            --warning-mode all \
             2>&1 | tee build-output.log
           BUILD_EXIT=${PIPESTATUS[0]}
-          echo ""
+
           if [ $BUILD_EXIT -eq 0 ]; then
+            echo ""
             echo "✅ BUILD RELEASE BERHASIL"
           else
-            echo "❌ BUILD RELEASE GAGAL (exit: $BUILD_EXIT)"
-            echo "=== Error dari log ==="
-            grep -E "(error|Error|FAILED|Exception)" build-output.log | tail -30
+            echo ""
+            echo "❌ BUILD GAGAL (exit code: $BUILD_EXIT)"
+            grep -E "(^e:|error:|FAILED|Exception|Caused by:|> Could not|> Task)" \
+              build-output.log | head -40
             exit 1
           fi
 
-      - name: 🔎 Info APK output
+      # ── 9. APK Info ────────────────────────────────────────────
+      - name: 🔎 APK Output Info
+        if: success()
         run: |
           echo "=== APK yang dihasilkan ==="
           find . -name "*.apk" -not -path "*/intermediates/*" | while read apk; do
-            size=$(du -sh "$apk" | cut -f1)
-            echo "📦 $(basename $apk) — $size"
-            echo "   Path: $apk"
+            echo "📦 $(basename $apk) — $(du -sh $apk | cut -f1)"
           done
 
+      # ── 10. Upload APK Debug ───────────────────────────────────
       - name: 📤 Upload APK Debug
-        if: github.event.inputs.build_type != 'release'
+        if: success() && github.event.inputs.build_type != 'release'
         uses: actions/upload-artifact@v4
         with:
           name: ChargingMeter-debug-${{ github.run_number }}
@@ -125,30 +167,33 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # ── 11. Upload APK Release ─────────────────────────────────
       - name: 📤 Upload APK Release
-        if: github.event.inputs.build_type == 'release'
+        if: success() && github.event.inputs.build_type == 'release'
         uses: actions/upload-artifact@v4
         with:
-          name: ChargingMeter-release-${{ github.run_number }}
+          name: ChargingMeter-release-${{ github.run_number }}-unsigned
           path: app/build/outputs/apk/release/*.apk
           retention-days: 30
           if-no-files-found: error
 
-      - name: 📋 Upload log jika gagal
+      # ── 12. Upload Log jika GAGAL ──────────────────────────────
+      - name: 📋 Upload error log
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-error-${{ github.run_number }}
+          name: error-log-build${{ github.run_number }}
           path: |
             build-output.log
             app/build/reports/
           retention-days: 7
           if-no-files-found: ignore
 
+      # ── 13. Summary ────────────────────────────────────────────
       - name: 📊 Build Summary
         if: always()
         run: |
-          echo "## 🔋 ChargingMeter Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔋 ChargingMeter Build #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -159,6 +204,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📦 APK Output" >> $GITHUB_STEP_SUMMARY
           find . -name "*.apk" -not -path "*/intermediates/*" 2>/dev/null | while read apk; do
-            size=$(du -sh "$apk" | cut -f1)
-            echo "- \`$(basename $apk)\` — **$size**" >> $GITHUB_STEP_SUMMARY
-          done || echo "- Tidak ada APK dihasilkan" >> $GITHUB_STEP_SUMMARY
+            echo "- \`$(basename $apk)\` — **$(du -sh $apk | cut -f1)**" >> $GITHUB_STEP_SUMMARY
+          done || echo "- ❌ Tidak ada APK" >> $GITHUB_STEP_SUMMARY

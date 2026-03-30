@@ -218,7 +218,7 @@ fun MainScreen(viewModel: BatteryViewModel) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 InfoCard(
-                    icon = Icons.Rounded.FavoriteRounded,
+                    icon = Icons.Rounded.Favorite,
                     label = "Kesehatan",
                     value = healthLabel(info.health),
                     modifier = Modifier.weight(1f),
@@ -286,7 +286,7 @@ private fun StatusBadge(info: com.yuki.chargingmeter.util.BatteryInfo) {
             MaterialTheme.colorScheme.primary
         )
         info.isCharging -> Triple(
-            Icons.Rounded.BoltRounded,
+            Icons.Rounded.Bolt,
             "${plugLabel(info.plugType)} Charging",
             MaterialTheme.colorScheme.primary
         )
@@ -310,7 +310,7 @@ private fun StatusBadge(info: com.yuki.chargingmeter.util.BatteryInfo) {
 }
 
 @Composable
-private fun temperatureContainerColor(temp: Float): androidx.compose.ui.graphics.Color {
+private fun temperatureContainerColor(temp: Float): Color {
     return when {
         temp >= 45f -> MaterialTheme.colorScheme.errorContainer
         temp >= 38f -> MaterialTheme.colorScheme.tertiaryContainer
@@ -319,7 +319,7 @@ private fun temperatureContainerColor(temp: Float): androidx.compose.ui.graphics
 }
 
 @Composable
-private fun healthContainerColor(health: BatteryHealth): androidx.compose.ui.graphics.Color {
+private fun healthContainerColor(health: BatteryHealth): Color {
     return when (health) {
         BatteryHealth.GOOD    -> MaterialTheme.colorScheme.secondaryContainer
         BatteryHealth.OVERHEAT, BatteryHealth.OVER_VOLTAGE, BatteryHealth.FAILURE ->
